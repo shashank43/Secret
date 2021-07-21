@@ -9,6 +9,10 @@ const session = require('express-session');
 const passport = require('passport');
 const passportLocalMongoose = require('passport-local-mongoose');
 
+const GoogleStrategy = require('passport-google-oauth20').Strategy;
+
+const findOrCreate = require('mongoose-findorcreate')
+
 //parses incoming requests with urlencoded payloads
 //and is based on body-parser
 app.use(express.urlencoded({ extended: true }));    // to support URL-encoded bodies
@@ -42,21 +46,12 @@ mongoose.set('useCreateIndex', true);
 //user schema
 const userSchema = new mongoose.Schema({
     email: String, 
-    password: String
+    password: String,
+    googleId: String
 });
 
 userSchema.plugin(passportLocalMongoose);
-
-// const bcrypt = require('bcryptjs');
-// const saltRounds = 10;
-
-//md5 hashing
-//const md5 = require('md5');
-
-//mongoose-encryption
-// const encrypt = require('mongoose-encryption');
-// const secret = process.env.SECRET;
-// userSchema.plugin(encrypt, {secret: secret, encryptedFields: ["password"]});
+userSchema.plugin(findOrCreate);
 
 //user model
 const User = new mongoose.model("User", userSchema);
@@ -64,12 +59,43 @@ const User = new mongoose.model("User", userSchema);
 // CHANGE: USE "createStrategy" INSTEAD OF "authenticate"
 passport.use(User.createStrategy());
 
-passport.serializeUser(User.serializeUser());
-passport.deserializeUser(User.deserializeUser());
+passport.serializeUser(function(user, done) {
+    done(null, user.id);
+});
+  
+passport.deserializeUser(function(id, done) {
+    User.findById(id, function(err, user) {
+        done(err, user);
+    });
+});
+
+passport.use(new GoogleStrategy({
+    clientID: process.env.CLIENT_ID,
+    clientSecret: process.env.CLIENT_SECRET,
+    callbackURL: "http://localhost:3000/auth/google/secrets"
+  },
+  function(accessToken, refreshToken, profile, cb) {
+      console.log(profile);
+    User.findOrCreate({ googleId: profile.id }, function (err, user) {
+      return cb(err, user);
+    });
+  }
+));
 
 app.get('/', (req, res) => {
   res.render('home');
 });
+
+app.get('/auth/google', passport.authenticate('google', {
+    scope: ['profile']
+}));
+
+app.get('/auth/google/secrets', 
+    passport.authenticate('google', { failureRedirect: '/login' }),
+    function(req, res) {
+        // Successful authentication, redirect home.
+        res.redirect('/secrets');
+    });
 
 app.get('/login', (req, res) => {
     res.render('login');
@@ -105,60 +131,10 @@ app.post('/register', function(req, res) {
             res.redirect('/register')
         }
     })
-
-    // bcrypt.hash(req.body.password, saltRounds, function(err, hash) {
-    //     const newUser = new User({
-    //         email: req.body.username,
-    //         password: hash
-    //     });
-    //     newUser.save(function(err) {
-    //         if(!err) {
-    //             res.render('secrets');
-    //         }
-    //         else {
-    //             console.err(err);
-    //         }
-    //     });
-    // });
 });
 
 app.post('/login', passport.authenticate('local', { failureRedirect: '/login' }), function(req, res) {
-
     res.redirect('secrets');
-
-    // const user = new User({
-    //     username: req.body.username,
-    //     password: req.body.password
-    // });
-    // req.login(user, function(err) {
-    //     if(!err) {
-    //         passport.authenticate('local')(req, res, function(){
-    //             res.redirect('/secrets');
-    //         })
-    //     }
-    //     else {
-    //         console.error(err);
-    //     }
-    // });
-
-    // const username = req.body.username;
-    // const password = req.body.password;
-    
-    // bcrypt
-    // User.findOne({email: username}, function(err, foundUser) {
-    //     if(!err) {
-    //         if(foundUser) {
-    //             bcrypt.compare(password, foundUser.password, function(err, result) {
-    //                 if(result === true) {
-    //                     res.render('secrets');
-    //                 }
-    //             });
-    //         }
-    //     }
-    //     else {
-    //         console.error(err);
-    //     }
-    // });
 });
 
 //This app starts a server and listens on 'port' for connections
